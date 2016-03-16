@@ -11,6 +11,7 @@ module.exports = function (options) {
 				"forScore": 0,
 				"againstScore": 0,
 				"prCount": 0,
+				"prFilteredCount": 0,
 				"forTotalCount": 0,
 				"forFilteredCount": 0,
 				"forUnfilteredCount": 0,
@@ -27,6 +28,7 @@ module.exports = function (options) {
 				user.scores.forScore += repo.scores.forScore;
 				user.scores.againstScore += repo.scores.againstScore;
 				user.scores.prCount += repo.prs.length;
+				user.scores.prFilteredCount += repo.scores.prFilteredCount;
 				user.scores.forTotalCount += repo.for.length;
 				user.scores.forFilteredCount += repo.for.filter(comment => comment.filtered).length;
 				user.scores.forUnfilteredCount += repo.for.filter(comment => !comment.filtered).length;

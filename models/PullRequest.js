@@ -48,6 +48,7 @@ var schema = new Schema({
 	},
 	"merged": Boolean,
 	"mergeable": Boolean,
+	"filtered": Boolean,
 	"mergeable_state": String,
 	"merged_by": String,
 	"comments": Number,
@@ -55,7 +56,15 @@ var schema = new Schema({
 	"commits": Number,
 	"additions": Number,
 	"deletions": Number,
-	"changed_files": Number
+	"changed_files": Number,
+	"files": [{
+		"sha": String,
+		"filename": String,
+		"status": String,
+		"additions": Number,
+		"deletions": Number,
+		"changes": Number
+	}]
 });
 
 var PullRequest = mongoose.model("PullRequest", schema);

@@ -26,13 +26,16 @@ module.exports = function (options) {
 				repo.scores = {
 					"kudos": 0,
 					"prScore": 0,
+					"prFilteredCount": 0,
 					"forScore": 0,
 					"againstScore": 0,
 					"averageCommentsPerPr": 0,
 					"sentiment": 0,
 					"emojis": 0
 				};
-				repo.scores.prScore = repo.prs.length * options.weighting.pr;
+
+				repo.scores.prFilteredCount = repo.prs.filter(pr => pr.filtered).length;
+				repo.scores.prScore = (repo.prs.length - repo.scores.prFilteredCount) * options.weighting.pr;
 
 				repo.scores.againstScore = repo.against.reduce(scoreAgainstComment, 0);
 				repo.scores.forScore = repo.for.reduce(scoreForComment, 0);

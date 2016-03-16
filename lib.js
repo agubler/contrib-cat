@@ -21,6 +21,7 @@ module.exports = class ContribCat {
 		this.config = config;
 		this.getUserTemplate = _.template("${apiUrl}/users/${username}");
 		this.getPullsTemplate = _.template("${apiUrl}/repos/${org}/${repo}/pulls?page=${page}&per_page=${size}&state=all&base=${head}&sort=updated&direction=desc");
+		this.getPullRequestFilesTemplate = _.template("${apiUrl}/repos/${repo}/pulls/${number}/files");
 		this.cutOffDate = moment().startOf("day").subtract(this.config.syncDays, "days");
 		mongoose.connect(connectionTemplate(this.config.store), { keepAlive: 120 });
 	}
@@ -30,6 +31,7 @@ module.exports = class ContribCat {
 			get.load();
 		}
 		var results = this.getPullRequestsForRepos(this.config)
+			.then(this.getPullRequestFiles.bind(this))
 			.then(this.getCommentsOnCodeForPullRequestsBatch.bind(this))
 			.then(this.getCommentsOnIssueForPullRequestsBatch.bind(this));
 
@@ -46,7 +48,8 @@ module.exports = class ContribCat {
 			.then(this.getUserStatistics.bind(this))
 			.then(this.runPluginsForSync.bind(this))
 			.then(this.saveUsers.bind(this))
-			.then(this.saveComments.bind(this));
+			.then(this.saveComments.bind(this))
+			.then(this.savePrs.bind(this));
 	}
 
 	_fetchPullRequests(url, repo) {
@@ -113,6 +116,30 @@ module.exports = class ContribCat {
 			return PullRequest.find(query).lean().execAsync();
 		});
 	}
+
+	getPullRequestFiles(prs) {
+		return batch(prs, 15, (prBatch) => {
+			return Promise.map(prBatch, (pr) => {
+				var url = this.getPullRequestFilesTemplate({
+					"apiUrl": this.config.apiUrl,
+					"repo": pr.base.repo.full_name,
+					"number": pr.number
+				});
+				return _get({uri: url, json: true}).then((response) => {
+					let files = response[1];
+					if (!files) {
+						console.log(pr);
+					} else {
+						pr.files = response[1];
+					}
+
+					return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
+				});
+			}).then(() => {
+				return prs;
+			});
+		})
+	};
 
 	getCommentsOnCodeForPullRequests(prs) {
 		return Promise.map(prs, (pr) => {
@@ -285,6 +312,18 @@ module.exports = class ContribCat {
 					return Promise.map(repo.against, (comment) => {
 						return Comment.findOneAndUpdate({"_id": comment._id}, comment, {"new": true}).execAsync().reflect();
 					});
+				});
+			});
+		}).then(() => {
+			return users;
+		});
+	}
+
+	savePrs(users) {
+		return Promise.map(users, (user) => {
+			return Promise.map(user.repos, (repo) => {
+				return Promise.map(repo.prs, (pr) => {
+					return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
 				});
 			});
 		}).then(() => {
