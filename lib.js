@@ -9,6 +9,7 @@ var mongoose = require('mongoose');
 var _get = Promise.promisify(request.get, {multiArgs: true});
 var get = require("./cache")(_get);
 var PullRequest = require("./models/PullRequest").PullRequest;
+var batch = require("./batch");
 var Comment = require("./models/Comment");
 var User = require("./models/User");
 var connectionTemplate = _.template("mongodb://${url}/${db}");
@@ -30,10 +31,12 @@ module.exports = class ContribCat {
 		if (this.config.caching) {
 			get.load();
 		}
+
 		var results = this.getPullRequestsForRepos(this.config)
 			.then(this.getPullRequestFiles.bind(this))
 			.then(this.getCommentsOnCodeForPullRequestsBatch.bind(this))
-			.then(this.getCommentsOnIssueForPullRequestsBatch.bind(this));
+			.then(this.getCommentsOnIssueForPullRequestsBatch.bind(this))
+			.then(this.associateCommentsToPullRequests.bind(this));
 
 		if (this.config.caching) {
 			results.then(get.dump);
@@ -52,6 +55,29 @@ module.exports = class ContribCat {
 			.then(this.savePrs.bind(this));
 	}
 
+	associateCommentsToPullRequests() {
+		let execArray = [
+			PullRequest.find({ updated_at: {$gt: this.cutOffDate.toDate()}}).execAsync(),
+			Comment.find({ updated_at: {$gt: this.cutOffDate.toDate()}}).execAsync()
+		];
+
+		return Promise.all(execArray).then((results) => {
+			let pullRequests = results[0];
+			let comments = results[1];
+
+			let commentGroups = _.groupBy(comments, "pull_request_url");
+			Object.keys(commentGroups).forEach((key) => {
+				let commentsForPr = commentGroups[key];
+				let pullRequest = _.find(pullRequests, { "url": key });
+				pullRequest.comments = commentsForPr;
+			});
+
+			return Promise.map(pullRequests, (pullRequest) => {
+				return pullRequest.save();
+			})
+		});
+	}
+
 	_fetchPullRequests(url, repo) {
 		return get(url, repo).spread((response, body) => {
 			body = _.cloneDeep(body);
@@ -64,6 +90,7 @@ module.exports = class ContribCat {
 			return Promise.map(items, (item) => {
 				item.base.repo.full_name = item.base.repo.full_name.toLowerCase();
 				item.user.login = item.user.login.toLowerCase();
+				item.comments = [];
 				return PullRequest.findOneAndUpdate({"url": item.url}, item, {"upsert": true}).execAsync().reflect();
 			}).then(() => {
 				if (links && links.next && items.length === body.length) {
