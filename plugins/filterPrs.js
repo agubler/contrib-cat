@@ -2,8 +2,8 @@
 module.exports = function (options) {
 	let filteredFileNames = new RegExp(options.ignoreFilesRegEx);
 
-	return function (results) {
-		results.users.forEach((user) => {
+	return function (users) {
+		users.forEach((user) => {
 			user.repos.forEach((repo) => {
 				repo.prs.forEach((pr) => {
 					pr.filtered = !!(!pr.merged_at && pr.closed_at);
@@ -13,6 +13,6 @@ module.exports = function (options) {
 				});
 			});
 		});
-		return results;
+		return users;
 	};
 };

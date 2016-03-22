@@ -4,8 +4,8 @@ module.exports = function (options) {
 	options = options || {};
 	options.excludes = options.excludes || [];
 	options.inactive = options.inactive || {};
-	return function (results) {
-		results.users.forEach((user) => {
+	return function (users) {
+		users.forEach((user) => {
 			let filtered = false;
 			if (options.excludes.indexOf(user.name) !== -1) {
 				filtered = true;
@@ -18,6 +18,6 @@ module.exports = function (options) {
 			}
 			user.filtered = filtered;
 		});
-		return results;
+		return users;
 	};
 };

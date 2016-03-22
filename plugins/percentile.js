@@ -1,6 +1,6 @@
 "use strict";
-module.exports = function(results) {
-	var filteredUsers = results.users.filter((user) => !user.filtered);
+module.exports = function(users) {
+	var filteredUsers = users.filter((user) => !user.filtered);
 	filteredUsers.sort(function (a, b) {
 		if (a.scores.kudos > b.scores.kudos) {
 			return 1;
@@ -15,5 +15,5 @@ module.exports = function(results) {
 		user.scores.percentile = Math.round(index/filteredUsers.length * 100);
 	});
 
-	return results;
+	return users;
 };

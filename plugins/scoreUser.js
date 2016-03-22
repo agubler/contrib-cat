@@ -3,8 +3,8 @@ var moment = require("moment");
 
 module.exports = function (options) {
 
-	return function (results) {
-		results.users.forEach(function (user) {
+	return function (users) {
+		users.forEach(function (user) {
 			user.scores = {
 				"kudos": 0,
 				"prScore": 0,
@@ -44,16 +44,17 @@ module.exports = function (options) {
 			user.scores.averageCommentsPerPrForSort = averageCommentsPerPr;
 
 			var created = moment(user.details.created_at).startOf("day");
-			var after = created.isAfter(results.startDate);
+			var reportDate = moment().startOf("day").subtract(user.duration, "days");
+			var after = created.isAfter(reportDate);
 
 			if (after) {
-				var days = created.diff(results.startDate, "days");
-				var average = user.scores.kudos/(results.reportDays - days);
+				var days = created.diff(reportDate, "days");
+				var average = user.scores.kudos/(user.duration - days);
 				user.partial = true;
 				user.scores.originalKudos = user.scores.kudos;
-				user.scores.kudos = Math.round(average * results.reportDays);
+				user.scores.kudos = Math.round(average * user.duration);
 			}
 		});
-		return results;
+		return users;
 	};
 };

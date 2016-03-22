@@ -1,8 +1,8 @@
 "use strict";
 var _ = require("lodash");
 
-module.exports = function (results) {
-	results.users.forEach(user => {
+module.exports = function (users) {
+	users.forEach(user => {
 		user.repos.sort(function (a, b) {
 			if (a.scores.kudos > b.scores.kudos) {
 				return 1;
@@ -20,5 +20,5 @@ module.exports = function (results) {
 		user.weakestRepos = _.takeRight(clonedRepos, bestRepoCount).reverse();
 	});
 
-	return results;
+	return users;
 };

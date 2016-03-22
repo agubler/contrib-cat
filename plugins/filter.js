@@ -5,8 +5,8 @@ module.exports = function (options) {
 	options = options || {};
 	options.excludes = options.excludes || [];
 	regExp = new RegExp(options.excludes.join("|"), "i");
-	return function (results) {
-		results.users.forEach(function (user) {
+	return function (users) {
+		users.forEach(function (user) {
 			user.for = user.for.filter(function (comment) {
 				return !regExp.test(comment.body);
 			});
@@ -15,6 +15,6 @@ module.exports = function (options) {
 				return !regExp.test(comment.body);
 			});
 		});
-		return results;
+		return users;
 	};
 };

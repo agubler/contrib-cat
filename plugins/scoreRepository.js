@@ -20,8 +20,8 @@ module.exports = function (options) {
 		return scoreComment(previousValue, currentValue, options.weighting.against);
 	}
 
-	return function (results) {
-		results.users.forEach(function (user) {
+	return function (users) {
+		users.forEach(function (user) {
 			user.repos.forEach((repo) => {
 				repo.scores = {
 					"kudos": 0,
@@ -55,6 +55,6 @@ module.exports = function (options) {
 				repo.scores.kudos = (repo.scores.againstScore + repo.scores.forScore) + repo.scores.prScore;
 			});
 		});
-		return results;
+		return users;
 	};
 };

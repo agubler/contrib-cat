@@ -28,13 +28,13 @@ module.exports = function (options) {
 		return !filtered;
 	}
 
-	return function (results) {
-		results.users.forEach((user) => {
+	return function (users) {
+		users.forEach((user) => {
 			user.repos.forEach((repo) => {
 				repo.against.forEach(filterComment);
 				repo.for.forEach(filterComment);
 			});
 		});
-		return results;
+		return users;
 	};
 };
