@@ -54,9 +54,7 @@ module.exports = class ContribCat {
 				return Promise.map(this.config.reportDays, (days) => {
 					return this.createUsers(days, startDate)
 						.then(this.runPluginsForSync.bind(this))
-						.then(this.saveUsers.bind(this))
-						.then(this.saveComments.bind(this))
-						.then(this.savePrs.bind(this));
+						.then(this.saveUsers.bind(this));
 				});
 			});
 	}
