@@ -51,7 +51,6 @@ var schema = new Schema({
 	"filtered": Boolean,
 	"mergeable_state": String,
 	"merged_by": String,
-	"comments": [{type: mongoose.Schema.Types.ObjectId, ref: "Comment"}],
 	"review_comments": Number,
 	"commits": Number,
 	"additions": Number,

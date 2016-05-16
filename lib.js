@@ -6,8 +6,8 @@ var Promise = require('bluebird');
 var _ = require("lodash");
 var linkParser = require('parse-link-header');
 var mongoose = require('mongoose');
-var _get = Promise.promisify(request.get, {multiArgs: true});
-var get = require("./cache")(_get);
+var requestDefaults = request.defaults({"json": true});
+var get = Promise.promisify(requestDefaults.get, {multiArgs: true});
 var UserDetails = require("./models/UserDetails");
 var PullRequest = require("./models/PullRequest").PullRequest;
 var batch = require("./batch");
@@ -25,99 +25,89 @@ module.exports = class ContribCat {
 		this.getAllUsersTemplate = _.template("${apiUrl}/users");
 		this.getPullsTemplate = _.template("${apiUrl}/repos/${org}/${repo}/pulls?page=${page}&per_page=${size}&state=all&base=${head}&sort=updated&direction=desc");
 		this.getPullRequestFilesTemplate = _.template("${apiUrl}/repos/${repo}/pulls/${number}/files");
-		this.cutOffDate = moment().startOf("day").subtract(this.config.syncDays, "days");
+		this.cutOffDate = moment.utc().startOf("day").subtract(this.config.syncDays, "days");
+		this.modelMap = {
+			"comments": Comment,
+			"pullRequests": PullRequest
+		};
 		mongoose.connect(connectionTemplate(this.config.store), { keepAlive: 120 });
 	}
 
 	load() {
-		if (this.config.caching) {
-			get.load();
-		}
-
-		var results = this.getPullRequestsForRepos(this.config)
+		return this.getPullRequestsForRepos(this.config)
 			.then(this.getPullRequestFiles.bind(this))
-			.then(this.getCommentsOnCodeForPullRequestsBatch.bind(this))
-			.then(this.getCommentsOnIssueForPullRequestsBatch.bind(this));
-
-		if (this.config.caching) {
-			results.then(get.dump);
-		}
-		return results;
+			.then(this.getCommentsForPullRequests.bind(this, "comment"))
+			.then(this.getCommentsForPullRequests.bind(this, "issue"));
 	}
 
 	sync(startDate) {
 		if (!startDate) {
-			startDate = moment().startOf("days").toDate();
+			startDate = moment.utc().startOf("days").toDate();
 		}
-
+		console.log("Starting sync for", startDate);
 		return this.fetchUsers().then(() => {
-				return Promise.map(this.config.reportDays, (days) => {
-					return this.createUsers(days, startDate)
-						.then(this.runPluginsForSync.bind(this))
-						.then(this.saveUsers.bind(this));
-				});
+			return Promise.map(this.config.reportDays, (days) => {
+				return this.createUsers(days, startDate)
+					.then(this.runPlugins.bind(this, "users"))
+					.then(this.saveUsers.bind(this));
 			});
+		});
 	}
 
 	fetchUsers(url) {
-		if (!url) {
-			url = this.getAllUsersTemplate({"apiUrl": this.config.apiUrl});
-		}
-		return get(url, "users").spread((response, body) => {
-			let links = linkParser(response.headers.link);
+		if (!this.usersFetched) {
+			if (!url) {
+				console.log("Fetching user details");
+				url = this.getAllUsersTemplate({"apiUrl": this.config.apiUrl});
+			}
+			return get(url).spread((response, body) => {
+				let links = linkParser(response.headers.link);
 
-			return Promise.map(body, (userDetails) => {
-				userDetails.login = userDetails.login.toLowerCase();
-				return get(this.getUserTemplate({"apiUrl": this.config.apiUrl, "username": userDetails.login}), "users").spread((response, body) => {
-					return UserDetails.findOneAndUpdate({"login": body.login}, body, {"upsert": true}).execAsync().reflect();
+				return Promise.map(body, (userDetails) => {
+					userDetails.login = userDetails.login.toLowerCase();
+					return get(this.getUserTemplate({
+						"apiUrl": this.config.apiUrl,
+						"username": userDetails.login
+					})).spread((response, body) => {
+						return UserDetails.findOneAndUpdate({"login": body.login}, body, {"upsert": true}).execAsync().reflect();
+					});
+				}).then(() => {
+					if (links && links.next) {
+						return this.fetchUsers(links.next.url);
+					} else {
+						this.usersFetched = true;
+						console.log("Fetching user details completed");
+					}
 				});
-			}).then(() => {
-				if (links && links.next) {
-					return this.fetchUsers(links.next.url);
-				}
 			});
-		});
+		} else {
+			console.log("user details cached");
+			return Promise.resolve();
+		}
 	}
 
-	_fetchPullRequests(url, repo) {
-		return get(url, repo).spread((response, body) => {
-			body = _.cloneDeep(body);
+	_fetch(url, type, preProcessor, doNextPage) {
+		return get(url).spread((response, body) => {
 			var links = linkParser(response.headers.link);
+			let items = _.cloneDeep(body);
 
-			var items = body.filter((item) => {
-				return moment(item.updated_at).isAfter(this.cutOffDate);
-			});
+			if (typeof preProcessor === "function") {
+				items = items.filter(preProcessor);
+			}
+
+			if (!doNextPage || typeof doNextPage !== "function") {
+				doNextPage = function() {
+					return true;
+				}
+			}
 
 			return Promise.map(items, (item) => {
-				item.base.repo.full_name = item.base.repo.full_name.toLowerCase();
-				item.user.login = item.user.login.toLowerCase();
-				item.comments = [];
-				return PullRequest.findOneAndUpdate({"url": item.url}, item, {"upsert": true}).execAsync().reflect();
+				return this.runPlugins(type, item).then((item) => {
+					return this.modelMap[type].findOneAndUpdate({"url": item.url}, item, {"upsert": true}).execAsync().reflect();
+				});
 			}).then(() => {
-				if (links && links.next && items.length === body.length) {
-					return this._fetchPullRequests(links.next.url, repo);
-				}
-			});
-		});
-	}
-
-	_fetchCommentsForPullRequest(url, pr_url, repo) {
-		return get(url, repo).spread((response, body) => {
-			var links = linkParser(response.headers.link);
-
-			body = _.cloneDeep(body);
-			body.forEach((comment) => {
-				comment.user.login = comment.user.login.toLowerCase();
-				if (!comment.pull_request_url) {
-					comment.pull_request_url = pr_url;
-				}
-			});
-
-			return Promise.map(body, (item) => {
-				return Comment.createAsync(item).reflect();
-			}).then(() => {
-				if (links && links.next) {
-					return this._fetchCommentsForPullRequest(links.next.url, pr_url, repo);
+				if (links && links.next && doNextPage(body, items)) {
+					return this._fetch(links.next.url, type, preProcessor, doNextPage);
 				}
 			});
 		});
@@ -125,6 +115,17 @@ module.exports = class ContribCat {
 
 	getPullRequestsForRepos() {
 		var query = {"$or": []};
+		const preProcessor = function(item) {
+			item.base.repo.full_name = item.base.repo.full_name.toLowerCase();
+			item.user.login = item.user.login.toLowerCase();
+			return moment.utc(item.updated_at).isAfter(this.cutOffDate);
+		}.bind(this);
+		let doNextPage = function(originalPrs, filterPrs) {
+			return originalPrs.length === filterPrs.length;
+		};
+
+		console.log("fetching pull requests updated since ", this.cutOffDate.toString());
+
 		return Promise.all(this.config.repos.map((target) => {
 			var parts = target.split(":");
 			var head = parts[1];
@@ -138,7 +139,7 @@ module.exports = class ContribCat {
 				"size": this.config.pageSize
 			});
 			query.$or.push({"base.repo.full_name": repo.toLowerCase()});
-			return this._fetchPullRequests(url, repo);
+			return this._fetch(url, "pullRequests", preProcessor, doNextPage);
 		})).then(() => {
 			query.updated_at = {$gt: this.cutOffDate.toDate()};
 			return PullRequest.find(query).lean().execAsync();
@@ -146,6 +147,7 @@ module.exports = class ContribCat {
 	}
 
 	getPullRequestFiles(prs) {
+		console.log("fetching files for", prs.length, "prs");
 		return batch(prs, 15, (prBatch) => {
 			return Promise.map(prBatch, (pr) => {
 				var url = this.getPullRequestFilesTemplate({
@@ -153,7 +155,7 @@ module.exports = class ContribCat {
 					"repo": pr.base.repo.full_name,
 					"number": pr.number
 				});
-				return _get({uri: url, json: true}).then((response) => {
+				return get(url).then((response) => {
 					let files = response[1];
 					if (!files) {
 						console.log(pr);
@@ -161,7 +163,9 @@ module.exports = class ContribCat {
 						pr.files = response[1];
 					}
 
-					return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
+					return this.runPlugins("pullRequests", pr).then((pr) => {
+						return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
+					});
 				});
 			}).then(() => {
 				return prs;
@@ -169,56 +173,28 @@ module.exports = class ContribCat {
 		})
 	};
 
-	getCommentsOnCodeForPullRequests(prs) {
-		return Promise.map(prs, (pr) => {
-			return this._fetchCommentsForPullRequest(pr.review_comments_url, pr.url, pr.base.repo.full_name);
-		}).then(() => {
-			return prs;
-		});
-	}
+	getCommentsForPullRequests(type, prs) {
+		console.log("fetching", type, "comments for", prs.length, "prs");
+		return batch(prs, 10, (prBatch) => {
+			return Promise.map(prBatch, (pr) => {
+				const prUrl = type === "comment" ? pr.review_comments_url : pr.comments_url;
+				const preProcessor = function(item) {
+					item.user.login = item.user.login.toLowerCase();
+					if (!item.pull_request_url) {
+						item.pull_request_url = pr.url;
+					}
+					return true;
+				};
 
-	getCommentsOnCodeForPullRequestsBatch(prs) {
-		var chunkedArray = _.chunk(prs, 10);
-		var first = chunkedArray.shift();
-
-		var finish = chunkedArray.reduce((defPrevious, current, currentIndex) => {
-			return defPrevious.then(() => {
-				console.log("Processing Pull Requests Comments batch", currentIndex + 1, "of", chunkedArray.length);
-				return this.getCommentsOnCodeForPullRequests(current);
+				return this._fetch(prUrl, "comments", preProcessor);
+			}).then(() => {
+				return prs;
 			});
-		}, this.getCommentsOnCodeForPullRequests(first));
-
-		return finish.then(() => {
-			return prs;
-		});
-	}
-
-	getCommentsOnIssueForPullRequests(prs) {
-		return Promise.map(prs, (pr) => {
-			return this._fetchCommentsForPullRequest(pr.comments_url, pr.url, pr.base.repo.full_name)
-		}).then(() => {
-			return prs;
-		});
-	}
-
-	getCommentsOnIssueForPullRequestsBatch(prs) {
-		var chunkedArray = _.chunk(prs, 10);
-		var first = chunkedArray.shift();
-
-		var finish = chunkedArray.reduce((defPrevious, current, currentIndex) => {
-			return defPrevious.then(() => {
-				console.log("Processing Issue Comments batch", currentIndex + 1, "of", chunkedArray.length);
-				return this.getCommentsOnIssueForPullRequests(current);
-			});
-		}, this.getCommentsOnIssueForPullRequests(first));
-
-		return finish.then(() => {
-			return prs;
 		});
 	}
 
 	createUsers(reportLength, startDate) {
-		let maxDate = moment(startDate).startOf("day").subtract(reportLength, "days");
+		let maxDate = moment.utc(startDate).startOf("day").subtract(reportLength, "days");
 		return UserDetails.find().lean().execAsync().then((userDetailsList) => {
 			let users = _.keyBy(userDetailsList.map(userDetails => {
 				return {
@@ -316,12 +292,6 @@ module.exports = class ContribCat {
 		});
 	}
 
-	runPluginsForSync(results) {
-		return this.runPlugins(results).then(result => {
-			return result;
-		});
-	}
-
 	saveUsers(users) {
 		return Promise.map(users, (user) => {
 			return User.findOneAndUpdate({"name": user.name, "date": user.date, "duration": user.duration}, user, {"upsert": true, "new": true}).execAsync().reflect();
@@ -330,45 +300,9 @@ module.exports = class ContribCat {
 		});
 	}
 
-	saveComments(users) {
-		return Promise.map(users, (user) => {
-			return Promise.map(user.repos, (repo) => {
-				return Promise.map(repo.for, (comment) => {
-					return Comment.findOneAndUpdate({"_id": comment._id}, comment, {"new": true}).execAsync().reflect();
-				}).then(() => {
-					return Promise.map(repo.against, (comment) => {
-						return Comment.findOneAndUpdate({"_id": comment._id}, comment, {"new": true}).execAsync().reflect();
-					});
-				});
-			});
-		}).then(() => {
-			return users;
-		});
-	}
-
-	savePrs(users) {
-		return Promise.map(users, (user) => {
-			return Promise.map(user.repos, (repo) => {
-				return Promise.map(repo.prs, (pr) => {
-					return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
-				});
-			});
-		}).then(() => {
-			return users;
-		});
-	}
-
-	runPlugins(result) {
-		return Promise.each(this.config.plugins, (plugin) => {
+	runPlugins(type, result) {
+		return Promise.each(this.config.plugins[type], (plugin) => {
 			return plugin(result);
-		}).then(() => {
-			return result;
-		});
-	}
-
-	runReporters(result) {
-		return Promise.each(this.config.reporters, (reporter) => {
-			return reporter(result);
 		}).then(() => {
 			return result;
 		});

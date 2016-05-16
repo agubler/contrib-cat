@@ -9,32 +9,53 @@ module.exports = {
 		url: "localhost",
 		db: "contribcat"
 	},
-	caching: true,
 	repos: [
 		"organisation/repo:branch"
 	],
-	plugins: [
-		filter({
-			excludes: ["exclude regex"]
-		}),
-		score({
-			"weighting": {
-				"for": {
-					"issue": 3,
-					"diff": 5
+plugins: {
+		comments: [
+			filterUsersComments({
+				"excludes": ["user-name"]
+			}),
+			filterComments({
+				"minLength": 20,
+				"filterIssueOnly": true
+			})],
+		pullRequests: [
+			filterPrs({
+				ignoreFilesRegEx: "pom.xml$|package.json$"
+			})
+		],
+		users: [
+			filterUsers({
+				"excludes": ["user-name"],
+				"inactive": {
+					"filter": true,
+					"suspendedOnly": true
 				},
-				"against": {
-					"issue": 1,
-					"diff": 2
-				},
-				"sentiment": 1,
-				"pr": 10
-			}
-		})
-	],
-	reporters: [
-		consoleReporter()
-	],
+				"filterSuspended": true
+			}),
+			repoScorer({
+				"weighting": {
+					"for": {
+						"issue": 2,
+						"diff": 2
+					},
+					"against": {
+						"issue": -1,
+						"diff": -1
+					},
+					"sentiment": 0,
+					"pr": 5
+				}
+			}),
+			filterEmptyRepositories({"useFilteredComments": true}),
+			userScorer({}),
+			comfortableRepositories,
+			percentile
+
+		]
+	},
 	pageSize: 20,
 	syncDays: 90,
 	reportDays: 365

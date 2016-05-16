@@ -1,7 +1,7 @@
 "use strict";
 module.exports = function (options) {
 
-	function filterComment(comment) {
+	return function(comment) {
 		let emojiRegex = /(:.*?:)/g;
 		let hasEmoji = emojiRegex.test(comment.body);
 		let excludedWords = ["merge", "merging"];
@@ -25,16 +25,6 @@ module.exports = function (options) {
 		}
 
 		comment.filtered = filtered;
-		return !filtered;
-	}
-
-	return function (users) {
-		users.forEach((user) => {
-			user.repos.forEach((repo) => {
-				repo.against.forEach(filterComment);
-				repo.for.forEach(filterComment);
-			});
-		});
-		return users;
+		return comment;
 	};
 };
