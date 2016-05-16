@@ -233,7 +233,8 @@ module.exports = class ContribCat {
 						"user.login": 1,
 						"filtered": 1,
 						"base.repo.full_name": 1,
-						"created_at": 1, "url": 1
+						"created_at": 1, 
+						"url": 1
 					}
 				).lean().execAsync().map((pr) => {
 
