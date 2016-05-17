@@ -1,5 +1,12 @@
-var score = require("./plugins/score");
-var consoleReporter = require("./reporters/consoleReporter");
+var userScorer = require("./plugins/scoreUser");
+var repoScorer = require("./plugins/scoreRepository");
+var filterComments = require("./plugins/filterComments");
+var filterUsers = require("./plugins/filterUsers");
+var comfortableRepositories = require("./plugins/comfortableRepositories");
+var percentile = require("./plugins/percentile");
+var filterPrs = require("./plugins/filterPrs");
+var filterUsersComments = require("./plugins/filterUsersComments");
+var filterEmptyRepositories = require("./plugins/filterEmptyRepositories");
 
 module.exports = {
 	apiUrl: "github_url",
@@ -12,7 +19,7 @@ module.exports = {
 	repos: [
 		"organisation/repo:branch"
 	],
-plugins: {
+	plugins: {
 		comments: [
 			filterUsersComments({
 				"excludes": ["user-name"]
@@ -53,10 +60,9 @@ plugins: {
 			userScorer({}),
 			comfortableRepositories,
 			percentile
-
 		]
 	},
 	pageSize: 20,
 	syncDays: 90,
-	reportDays: 365
+	reportDays: [365]
 };

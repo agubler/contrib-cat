@@ -9,6 +9,7 @@
     "bluebird": "^3.0.5",
     "chalk": "^1.1.1",
     "cli-table2": "^0.1.9",
+    "commander": "^2.9.0",
     "emojify-js": "^0.1.2",
     "emojify.js": "^1.1.0",
     "express": "^4.13.3",

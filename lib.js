@@ -1,5 +1,4 @@
 "use strict";
-
 var request = require("request");
 var moment = require("moment");
 var Promise = require('bluebird');
@@ -17,73 +16,90 @@ var connectionTemplate = _.template("mongodb://${url}/${db}");
 
 Promise.promisifyAll(mongoose);
 
+const getUserTemplate = _.template("${apiUrl}/users/${username}");
+const getAllUsersTemplate = _.template("${apiUrl}/users");
+const getPullsTemplate = _.template("${apiUrl}/repos/${org}/${repo}/pulls?page=${page}&per_page=${size}&state=all&base=${head}&sort=updated&direction=desc");
+const getPullRequestFilesTemplate = _.template("${apiUrl}/repos/${repo}/pulls/${number}/files");
+
+const modelMap = {
+	"comments": Comment,
+	"pullRequests": PullRequest
+};
+
+const maxSyncDate = moment.utc().startOf("day").subtract(1, "days");
+let minSyncDate = moment.utc().startOf("day").subtract(1, "days");
+
+function generateArrayOfDates(fromDate) {
+	let dateArray = [];
+	let dateToCheck;
+	for (dateToCheck = moment.utc(fromDate); dateToCheck.isSameOrBefore(maxSyncDate); dateToCheck.add(1, 'days')) {
+		dateArray.push(moment.utc(dateToCheck));
+	}
+	return dateArray;
+}
+
 module.exports = class ContribCat {
 
 	constructor(config) {
 		this.config = config;
-		this.getUserTemplate = _.template("${apiUrl}/users/${username}");
-		this.getAllUsersTemplate = _.template("${apiUrl}/users");
-		this.getPullsTemplate = _.template("${apiUrl}/repos/${org}/${repo}/pulls?page=${page}&per_page=${size}&state=all&base=${head}&sort=updated&direction=desc");
-		this.getPullRequestFilesTemplate = _.template("${apiUrl}/repos/${repo}/pulls/${number}/files");
-		this.cutOffDate = moment.utc().startOf("day").subtract(this.config.syncDays, "days");
-		this.modelMap = {
-			"comments": Comment,
-			"pullRequests": PullRequest
-		};
+		if (this.config.syncDays) {
+			minSyncDate = moment.utc().startOf("day").subtract(this.config.syncDays, "days");
+		}
 		mongoose.connect(connectionTemplate(this.config.store), { keepAlive: 120 });
 	}
 
-	load() {
-		return this.getPullRequestsForRepos(this.config)
-			.then(this.getPullRequestFiles.bind(this))
-			.then(this.getCommentsForPullRequests.bind(this, "comment"))
-			.then(this.getCommentsForPullRequests.bind(this, "issue"));
+	load(overrideMinSyncDate) {
+		minSyncDate = overrideMinSyncDate || minSyncDate;
+		return this._fetchUsers()
+			.then(this._loadPullRequests.bind(this))
+			.then(this._loadPullRequestFiles.bind(this))
+			.then(this._loadPullRequestComments.bind(this, "comment"))
+			.then(this._loadPullRequestComments.bind(this, "issue"))
+			.then(() => {
+				return overrideMinSyncDate;
+			});
 	}
 
-	sync(startDate) {
-		if (!startDate) {
-			startDate = moment.utc().startOf("days").toDate();
-		}
-		console.log("Starting sync for", startDate);
-		return this.fetchUsers().then(() => {
-			return Promise.map(this.config.reportDays, (days) => {
-				return this.createUsers(days, startDate)
-					.then(this.runPlugins.bind(this, "users"))
-					.then(this.saveUsers.bind(this));
+	sync(overrideMinSyncDate) {
+		minSyncDate = overrideMinSyncDate || minSyncDate;
+		return Promise.each(generateArrayOfDates(minSyncDate), (date) => {
+			console.log("Creating user statistics for", date.toString());
+
+			return Promise.each(this.config.reportDays, (days) => {
+				console.log("Generating report for", days, "days");
+				return this._createUsers(days, date)
+					.then(this._runPlugins.bind(this, "users"))
+					.then(this._saveUsers.bind(this));
 			});
 		});
 	}
+	
+	disconnect() {
+		return mongoose.disconnect();
+	}
 
-	fetchUsers(url) {
-		if (!this.usersFetched) {
-			if (!url) {
-				console.log("Fetching user details");
-				url = this.getAllUsersTemplate({"apiUrl": this.config.apiUrl});
-			}
-			return get(url).spread((response, body) => {
-				let links = linkParser(response.headers.link);
-
-				return Promise.map(body, (userDetails) => {
-					userDetails.login = userDetails.login.toLowerCase();
-					return get(this.getUserTemplate({
-						"apiUrl": this.config.apiUrl,
-						"username": userDetails.login
-					})).spread((response, body) => {
-						return UserDetails.findOneAndUpdate({"login": body.login}, body, {"upsert": true}).execAsync().reflect();
-					});
-				}).then(() => {
-					if (links && links.next) {
-						return this.fetchUsers(links.next.url);
-					} else {
-						this.usersFetched = true;
-						console.log("Fetching user details completed");
-					}
-				});
-			});
-		} else {
-			console.log("user details cached");
-			return Promise.resolve();
+	_fetchUsers(url) {
+		if (!url) {
+			console.log("Fetching user details");
+			url = getAllUsersTemplate({"apiUrl": this.config.apiUrl});
 		}
+		return get(url).spread((response, body) => {
+			let links = linkParser(response.headers.link);
+
+			return Promise.map(body, (userDetails) => {
+				userDetails.login = userDetails.login.toLowerCase();
+				return get(getUserTemplate({
+					"apiUrl": this.config.apiUrl,
+					"username": userDetails.login
+				})).spread((response, body) => {
+					return UserDetails.findOneAndUpdate({"login": body.login}, body, {"upsert": true}).execAsync().reflect();
+				});
+			}).then(() => {
+				if (links && links.next) {
+					return this._fetchUsers(links.next.url);
+				}
+			});
+		});
 	}
 
 	_fetch(url, type, preProcessor, doNextPage) {
@@ -102,8 +118,8 @@ module.exports = class ContribCat {
 			}
 
 			return Promise.map(items, (item) => {
-				return this.runPlugins(type, item).then((item) => {
-					return this.modelMap[type].findOneAndUpdate({"url": item.url}, item, {"upsert": true}).execAsync().reflect();
+				return this._runPlugins(type, item).then((item) => {
+					return modelMap[type].findOneAndUpdate({"url": item.url}, item, {"upsert": true}).execAsync().reflect();
 				});
 			}).then(() => {
 				if (links && links.next && doNextPage(body, items)) {
@@ -113,24 +129,24 @@ module.exports = class ContribCat {
 		});
 	}
 
-	getPullRequestsForRepos() {
+	_loadPullRequests() {
 		var query = {"$or": []};
 		const preProcessor = function(item) {
 			item.base.repo.full_name = item.base.repo.full_name.toLowerCase();
 			item.user.login = item.user.login.toLowerCase();
-			return moment.utc(item.updated_at).isAfter(this.cutOffDate);
+			return moment.utc(item.updated_at).isAfter(minSyncDate);
 		}.bind(this);
 		let doNextPage = function(originalPrs, filterPrs) {
 			return originalPrs.length === filterPrs.length;
 		};
 
-		console.log("fetching pull requests updated since ", this.cutOffDate.toString());
+		console.log("Fetching pull requests updated since", minSyncDate.toString());
 
 		return Promise.all(this.config.repos.map((target) => {
 			var parts = target.split(":");
 			var head = parts[1];
 			var repo = parts[0];
-			var url = this.getPullsTemplate({
+			var url = getPullsTemplate({
 				"apiUrl": this.config.apiUrl,
 				"org": repo.split("/")[0],
 				"repo": repo.split("/")[1],
@@ -141,16 +157,16 @@ module.exports = class ContribCat {
 			query.$or.push({"base.repo.full_name": repo.toLowerCase()});
 			return this._fetch(url, "pullRequests", preProcessor, doNextPage);
 		})).then(() => {
-			query.updated_at = {$gt: this.cutOffDate.toDate()};
+			query.updated_at = {$gt: minSyncDate.toDate()};
 			return PullRequest.find(query).lean().execAsync();
 		});
 	}
 
-	getPullRequestFiles(prs) {
-		console.log("fetching files for", prs.length, "prs");
+	_loadPullRequestFiles(prs) {
+		console.log("Fetching files for", prs.length, "prs");
 		return batch(prs, 15, (prBatch) => {
 			return Promise.map(prBatch, (pr) => {
-				var url = this.getPullRequestFilesTemplate({
+				var url = getPullRequestFilesTemplate({
 					"apiUrl": this.config.apiUrl,
 					"repo": pr.base.repo.full_name,
 					"number": pr.number
@@ -163,7 +179,7 @@ module.exports = class ContribCat {
 						pr.files = response[1];
 					}
 
-					return this.runPlugins("pullRequests", pr).then((pr) => {
+					return this._runPlugins("pullRequests", pr).then((pr) => {
 						return PullRequest.findOneAndUpdate({"_id": pr._id}, pr, {"new": true}).execAsync().reflect();
 					});
 				});
@@ -173,7 +189,7 @@ module.exports = class ContribCat {
 		})
 	};
 
-	getCommentsForPullRequests(type, prs) {
+	_loadPullRequestComments(type, prs) {
 		console.log("fetching", type, "comments for", prs.length, "prs");
 		return batch(prs, 10, (prBatch) => {
 			return Promise.map(prBatch, (pr) => {
@@ -193,13 +209,13 @@ module.exports = class ContribCat {
 		});
 	}
 
-	createUsers(reportLength, startDate) {
-		let maxDate = moment.utc(startDate).startOf("day").subtract(reportLength, "days");
+	_createUsers(reportLength, syncDate) {
+		let maxDate = moment.utc(syncDate).startOf("day").subtract(reportLength, "days");
 		return UserDetails.find().lean().execAsync().then((userDetailsList) => {
 			let users = _.keyBy(userDetailsList.map(userDetails => {
 				return {
 					"name": userDetails.login.toLowerCase(),
-					"date": startDate,
+					"date": syncDate,
 					"duration": reportLength,
 					"details": userDetails,
 					"repos": []
@@ -210,7 +226,7 @@ module.exports = class ContribCat {
 				{
 					updated_at: {
 						$gte: maxDate,
-						$lte: startDate
+						$lte: syncDate
 					}
 				},
 				{
@@ -226,7 +242,7 @@ module.exports = class ContribCat {
 					{
 						updated_at: {
 							$gte: maxDate,
-							$lte: startDate
+							$lte: syncDate
 						}
 					},
 					{
@@ -295,15 +311,23 @@ module.exports = class ContribCat {
 		});
 	}
 
-	saveUsers(users) {
+	_saveUsers(users) {
 		return Promise.map(users, (user) => {
-			return User.findOneAndUpdate({"name": user.name, "date": user.date, "duration": user.duration}, user, {"upsert": true, "new": true}).execAsync().reflect();
-		}).then(() => {
-			return users;
+			let query = {
+				"name": user.name,
+				"date": user.date,
+				"duration": user.duration
+			};
+			let options  = {
+				"upsert": true,
+				"new": true
+			};
+
+			return User.findOneAndUpdate(query, user, options).execAsync().reflect();
 		});
 	}
 
-	runPlugins(type, result) {
+	_runPlugins(type, result) {
 		return Promise.each(this.config.plugins[type], (plugin) => {
 			return plugin(result);
 		}).then(() => {
