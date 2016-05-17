@@ -6,10 +6,13 @@
 		<title>ContribCat</title>
 		<meta name="viewport" content="width=device-width">
 		<link rel="stylesheet" href="../bootstrap-theme-github/dist/css/bootstrap.css">
+		<link rel="stylesheet" href="../chartist/chartist.css">
 		<link rel="stylesheet" href="../emojify/css/basic/emojify.min.css" />
 		<link rel="stylesheet" href="../templates/app.css">
 		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min.js"></script>
 		<script type="text/javascript" src="../bootstrap-theme-github/dist/js/bootstrap.min.js"></script>
+		<script type="text/javascript" src="../chartist/chartist.js"></script>
+		<script type="text/javascript" src="../chartist/chartist-plugin-axistitle.js"></script>
 	</head>
 
 	<body>
@@ -24,6 +27,15 @@
 					</button>
 					<a class="navbar-brand" href="/">ContribCat</a>
 				</div>
+				<div class="navbar-collapse">
+					<ul class="nav navbar-nav navbar-right">
+						{% for duration in reports %}
+						<li>
+							<a href="/user/{{user.name}}?duration={{duration}}&date={{date}}">{{duration}}</a>
+						</li>
+						{% endfor %}
+					</ul>
+				</div>
 			</div>
 		</div>
 		<div class="container">
@@ -34,7 +46,7 @@
 						<div class="panel-body">
 							<h3>{{ user.details.name }}</h3>
 							<div class="grav">
-								<img src="{{ user.gravatar }}" width="230"/>
+								<img src="{{ user.details.avatar_url }}" width="230"/>
 							</div>
 							<div class="kudos">
 								<div class="score">{{ user.scores.kudos }}</div>
@@ -104,6 +116,9 @@
 						<div class="bs-example bs-example-tabs" data-example-id="togglable-tabs">
 							<ul id="myTabs" class="nav nav-tabs" role="tablist">
 								<li role="presentation" class="active">
+									<a href="#chart" role="tab" data-toggle="tab" aria-controls="chart" aria-expanded="true">History Trend</a>
+								</li>
+								<li role="presentation" class="">
 									<a href="#comments-for" role="tab" data-toggle="tab" aria-controls="comments-for" aria-expanded="true">Comments by you</a>
 								</li>
 								<li role="presentation" class="">
@@ -111,7 +126,12 @@
 								</li>
 							</ul>
 							<div class="tab-content comment-list">
-								<div role="tabpanel" class="tab-pane fade active in" id="comments-for" aria-labelledby="comments-for-tab">
+								<div role="tabpanel" class="tab-pane fade active in" id="chart">
+									<div class="panel-group" id="chart-accordion" role="tablist">
+										<div class="ct-chart ct-perfect-fourth" role="tab"></div>
+									</div>
+								</div>
+								<div role="tabpanel" class="tab-pane fade in" id="comments-for" aria-labelledby="comments-for-tab">
 									<div class="panel-group" id="for-accordion" role="tablist" aria-multiselectable="true">
 										{% for repo in user.repos|sort(false, false, "name") %}
 										<div class="panel panel-default">
@@ -187,12 +207,65 @@
 	</div>
 	<script src="../emojify/js/emojify.js"></script>
 	<script>
+
+		var percentile = document.querySelector(".percentile"),
+			chartData = {{ user.trendData | convertForChart | dump | safe }},
+			data = {
+				labels: chartData.labels,
+				series: [
+					chartData.values
+				]
+			},
+			months = [],
+			options = {
+				showPoint: false,
+				lineSmooth: true,
+				axisX: {
+					showGrid: false,
+					showLabel: true,
+					offset: 60,
+					labelInterpolationFnc: function(value) {
+
+						if (months.indexOf(value) === -1) {
+							months.push(value);
+							return value;
+						}
+						return null;
+					}
+				},
+				axisY: {
+					offset: 60
+				},
+				plugins: [
+					Chartist.plugins.ctAxisTitle({
+						axisX: {
+							axisTitle: 'Time',
+							axisClass: 'ct-axis-title',
+							offset: {
+								x: 0,
+								y: 40
+							},
+							textAnchor: 'middle'
+						},
+						axisY: {
+							axisTitle: 'Kudos',
+							axisClass: 'ct-axis-title',
+							offset: {
+								x: 0,
+								y: 0
+							},
+							textAnchor: 'middle'
+						}
+					})
+				]
+			};
+
 		emojify.setConfig({
 			img_dir: "../emojify/images/basic"
 		});
 		emojify.run(document.getElementById("comments"));
-		var percentile = document.querySelector(".percentile");
-		percentile.style.width = percentile.dataset.percentile + "%"
+		percentile.style.width = percentile.dataset.percentile + "%";
+		new Chartist.Line('.ct-chart', data, options);
 	</script>
 	</body>
 </html>
