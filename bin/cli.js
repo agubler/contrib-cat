@@ -5,15 +5,25 @@ const moment = require("moment");
 const ContribCat = require("./../lib/index");
 const config = require("./../config");
 
+function collectRepos(val, repos) {
+    repos.push(val);
+    return repos;
+}
+
 program
     .version("0.0.1")
     .option("-m, --mode <mode>", "ContribCat Mode [complete]", /^(load|sync)$/i, "all")
     .option("-d, --days <n>", "Load/Sync Days", 1)
+    .option('-r, --repos [value]', 'List repositories to filter to e.g. ["org/repo:branch"]', collectRepos, [])
     .parse(process.argv);
 
 const mode = program.mode;
 const days = program.days;
 const fromDate = moment.utc().startOf("day").subtract(days, "days");
+
+if (program.repos.length > 0) {
+    config.repos = program.repos;
+}
 
 const contribCat = new ContribCat(config);
 
