@@ -109,7 +109,7 @@ table.table-fixedheader {
 }
 
 table.table-fixedheader, table.table-fixedheader>thead, table.table-fixedheader>tbody, table.table-fixedheader>thead>tr, table.table-fixedheader>tbody>tr, table.table-fixedheader>thead>tr>th, table.table-fixedheader>tbody>td {
-	display: block;
+	
 }
 table.table-fixedheader>thead>tr:after, table.table-fixedheader>tbody>tr:after {
 	content:' ';
@@ -139,16 +139,15 @@ table.table-fixedheader>thead>tr>th:after, table.table-fixedheader>tbody>tr>td:a
 }
 
 table.table-fixedheader>thead tr th, table.table-fixedheader>tbody tr td {
-	width: 15%;
-	float: left;
+	width: 12%;
 	word-wrap:break-word;
 }
 
 table.table-fixedheader>tbody tr td.name, table.table-fixedheader>thead tr th.name {
-	width: 20%;
+	width: 12%;
 }
 
 table.table-fixedheader>tbody tr td.rank, table.table-fixedheader>thead tr th.rank {
-	width: 5%;
+	width: 4%;
 }
 

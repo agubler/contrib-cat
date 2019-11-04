@@ -1,6 +1,9 @@
 node_modules
+dist
 cache.json
 config.js
+config.ts
 *.bak
 cache
 .idea
+src/config.ts

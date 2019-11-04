@@ -5,10 +5,10 @@
 <head>
 	<title>ContribCat</title>
 	<meta name="viewport" content="width=device-width">
-	<link rel="stylesheet" href="../bootstrap-theme-github/dist/css/bootstrap.css">
+	<link rel="stylesheet" href="./bootstrap-theme-github/dist/css/bootstrap.css">
 	<link rel="stylesheet" href="./templates/app.css">
 	<link rel="stylesheet" href="./emojify/css/basic/emojify.min.css"/>
-	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min.js"></script>
+	<!-- <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min.js"></script> -->
 	<script type="text/javascript" src="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/js/bootstrap.min.js"></script>
 </head>
 
@@ -36,7 +36,7 @@
 					<tr>
 						<th class="rank">Rank</th>
 						<th class="name">Name</th>
-						<th>Pull Request Count</th>
+						<th>Merged PRs</th>
 						<th>Average Comments</th>
 						<th>Comments Made</th>
 						<th>Comments Received</th>
@@ -47,16 +47,18 @@
 					{% set rank = 0 %}
 					{% for user in users %}
 					{% if not user.filtered %}
+					{% if not user.partial %}
 					{% set rank = rank + 1 %}
 					<tr>
 						<td class="rank">{{ rank }}</td>
-						<td class="name"><a href="/user/{{ user.name }}">{{ user.name }}</a></td>
-						<td>{{ user.scores.prCount }}</td>
-						<td>{{ user.scores.averageCommentsPerPr }}</td>
-						<td>{{ user.scores.forUnfilteredCount }}</td>
-						<td>{{ user.scores.againstUnfilteredCount }}</td>
-						<td>{{ user.scores.kudos }} {% if user.partial %} (projected) {% endif %}</td>
+						<td class="name"><a href="/user/{{ user.login }}">{{ user.login }}</a></td>
+						<td>{{ user.prs.length }}</td>
+						<td>{{ user.against.length / users.prs.length }}</td>
+						<td>{{ user.for.length }}</td>
+						<td>{{ user.against.length }}</td>
+						<td>{{ user.kudos }}</td>
 					</tr>
+					{% endif %}
 					{% endif %}
 					{% endfor %}
 					</tbody>
